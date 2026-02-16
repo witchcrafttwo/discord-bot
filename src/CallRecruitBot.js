@@ -6,13 +6,13 @@ import {
   ButtonStyle
 } from 'discord.js';
 import cron from 'node-cron';
-
+import { VoiceReader } from './VoiceReader.js';
 export class CallRecruitBot {
   constructor(token, textChannelId, voiceChannelId) {
     this.token = token;
     this.textChannelId = textChannelId;
     this.voiceChannelId = voiceChannelId;
-
+    this.voiceReader = new VoiceReader(this.voiceChannelId);
     this.recruitHour = 22; // デフォルト
     this.recruitMinute = 0;
     this.job = null;
@@ -20,77 +20,121 @@ export class CallRecruitBot {
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
       ],
     });
   }
 
   start() {
-    this.client.once('clientready', async () => {
+    this.client.once('clientReady', async () => {
       console.log(`Logged in as ${this.client.user.tag}`);
 
       await this.registerSlashCommands();
       this.scheduleRecruitment();
     });
 
-    this.client.on('interactionCreate', async (interaction) => {
+   this.client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!this.voiceReader.connection) return;
 
-      // ===== スラッシュコマンド =====
-      if (interaction.isChatInputCommand()) {
+  // VC未接続なら読まない
+  if (!this.voiceReader.currentVoiceChannelId) return;
 
-        // /recruit
-        if (interaction.commandName === 'recruit') {
-          await this.postRecruitment();
-          await interaction.reply({
-            content: '通話募集を投稿したよ！',
-            ephemeral: true
-          });
-        }
+  // 今入っているVC取得
+  const voiceChannel = message.guild.channels.cache.get(
+    this.voiceReader.currentVoiceChannelId
+  );
 
-        // /settime
-        if (interaction.commandName === 'settime') {
+  if (!voiceChannel) return;
 
-  const hour = interaction.options.getInteger('hour');
-  const minute = interaction.options.getInteger('minute');
+  // VCのテキストチャットだけ読む
+  if (message.channel.id !== voiceChannel.id) return;
 
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    await interaction.reply({
-      content: '正しい時間を入力してください。（例: 22 30）',
-      ephemeral: true
-    });
-    return;
+  await this.voiceReader.speak(message.content);
+});
+
+
+this.client.on('interactionCreate', async (interaction) => {
+
+  // ===== スラッシュコマンド =====
+  if (interaction.isChatInputCommand()) {
+
+    // /join
+    if (interaction.commandName === 'join') {
+
+      const member = interaction.member;
+
+      if (!member.voice.channel) {
+        await interaction.reply({
+          content: '先にVCに入ってね！',
+          ephemeral: true
+        });
+        return;
+      }
+
+      await this.voiceReader.join(member);
+
+      await interaction.reply({
+        content: 'ずんだもんが参加したのだ！',
+        ephemeral: true
+      });
+    }
+
+    // /recruit
+    if (interaction.commandName === 'recruit') {
+      await this.postRecruitment();
+      await interaction.reply({
+        content: '通話募集を投稿したよ！',
+        ephemeral: true
+      });
+    }
+
+    // /settime
+    if (interaction.commandName === 'settime') {
+
+      const hour = interaction.options.getInteger('hour');
+      const minute = interaction.options.getInteger('minute');
+
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        await interaction.reply({
+          content: '正しい時間を入力してください。（例: 22 30）',
+          ephemeral: true
+        });
+        return;
+      }
+
+      this.recruitHour = hour;
+      this.recruitMinute = minute;
+      this.scheduleRecruitment();
+
+      await interaction.reply({
+        content: `募集時間を ${hour}:${minute.toString().padStart(2,'0')} に変更しました。`,
+        ephemeral: true
+      });
+    }
   }
 
-  this.recruitHour = hour;
-  this.recruitMinute = minute;
+  // ===== ボタン処理 =====
+  if (interaction.isButton()) {
+    if (interaction.customId === 'join_vc') {
+      const guild = interaction.guild;
+      const voiceChannel = await guild.channels.fetch(this.voiceChannelId);
 
-  this.scheduleRecruitment();
+      const invite = await voiceChannel.createInvite({
+        maxAge: 300,
+        maxUses: 1,
+      });
 
-  await interaction.reply({
-    content: `募集時間を ${hour}:${minute.toString().padStart(2,'0')} に変更しました。`,
-    ephemeral: true
-  });
-}
-}
+      await interaction.reply({
+        content: `🔗 ここから参加できるよ！\n${invite.url}`,
+        ephemeral: true,
+      });
+    }
+  }
+});
 
-      // ===== ボタン処理 =====
-      if (interaction.isButton()) {
-        if (interaction.customId === 'join_vc') {
-          const guild = interaction.guild;
-          const voiceChannel = await guild.channels.fetch(this.voiceChannelId);
-
-          const invite = await voiceChannel.createInvite({
-            maxAge: 300,
-            maxUses: 1,
-          });
-
-          await interaction.reply({
-            content: `🔗 ここから参加できるよ！\n${invite.url}`,
-            ephemeral: true,
-          });
-        }
-      }
-    });
 
     this.client.login(this.token);
   }
@@ -116,6 +160,10 @@ export class CallRecruitBot {
       description: '通話募集を投稿する'
     },
     {
+  name: 'join',
+  description: 'VCに参加して読み上げ開始'
+},
+    {
       name: 'settime',
       description: '募集時間を変更する',
       options: [
@@ -132,6 +180,7 @@ export class CallRecruitBot {
           required: true
         }
       ]
+      
     }
   ];
 
