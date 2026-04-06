@@ -1,9 +1,15 @@
-import { AttachmentBuilder } from 'discord.js';
-
 export class VoiceVoxReader {
-  constructor({ voicevoxBaseUrl, speakerId }) {
+  constructor({ voicevoxBaseUrl, defaultSpeakerId, speakerIds = [] }) {
     this.voicevoxBaseUrl = (voicevoxBaseUrl || 'http://127.0.0.1:50021').replace(/\/$/, '');
-    this.speakerId = Number.isNaN(Number(speakerId)) ? 1 : Number(speakerId);
+    this.defaultSpeakerId = Number.isNaN(Number(defaultSpeakerId)) ? 1 : Number(defaultSpeakerId);
+
+    this.speakerIds = speakerIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+
+    if (this.speakerIds.length === 0) {
+      this.speakerIds = [this.defaultSpeakerId];
+    }
   }
 
   normalizeMessage(content) {
@@ -18,22 +24,18 @@ export class VoiceVoxReader {
       .slice(0, 120);
   }
 
-  async createAttachment(message) {
-    const text = this.normalizeMessage(message.content);
-    if (!text) return null;
+  speakerForUser(userId) {
+    if (!userId) return this.defaultSpeakerId;
 
-    const spokenText = `${message.member?.displayName || message.author.username}、${text}`;
-    const audioBuffer = await this.synthesize(spokenText);
-
-    return new AttachmentBuilder(audioBuffer, {
-      name: `read-${Date.now()}.wav`,
-    });
+    const hash = [...String(userId)].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const index = hash % this.speakerIds.length;
+    return this.speakerIds[index];
   }
 
-  async synthesize(text) {
+  async synthesize(text, speakerId = this.defaultSpeakerId) {
     const queryParams = new URLSearchParams({
       text,
-      speaker: String(this.speakerId),
+      speaker: String(speakerId),
     });
 
     const audioQueryResponse = await fetch(`${this.voicevoxBaseUrl}/audio_query?${queryParams}`, {
@@ -46,16 +48,13 @@ export class VoiceVoxReader {
 
     const audioQuery = await audioQueryResponse.json();
 
-    const synthesisResponse = await fetch(
-      `${this.voicevoxBaseUrl}/synthesis?speaker=${this.speakerId}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(audioQuery),
-      }
-    );
+    const synthesisResponse = await fetch(`${this.voicevoxBaseUrl}/synthesis?speaker=${speakerId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(audioQuery),
+    });
 
     if (!synthesisResponse.ok) {
       throw new Error(`synthesis failed: ${synthesisResponse.status}`);

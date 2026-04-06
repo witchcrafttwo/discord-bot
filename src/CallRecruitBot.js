@@ -20,7 +20,11 @@ export class CallRecruitBot {
 
     this.voiceReadAloudManager = new VoiceReadAloudManager({
       voicevoxBaseUrl: process.env.VOICEVOX_API_URL,
-      speakerId: process.env.VOICEVOX_SPEAKER_ID,
+      defaultSpeakerId: process.env.VOICEVOX_SPEAKER_ID,
+      speakerIds: (process.env.VOICEVOX_SPEAKER_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
     });
 
     this.client = new Client({
@@ -101,7 +105,7 @@ export class CallRecruitBot {
           return;
         }
 
-        if (interaction.commandName === 'leave') {
+        if (interaction.commandName === 'leave' || interaction.commandName === 'bye') {
           this.voiceReadAloudManager.leave(interaction.guildId);
           await interaction.reply({
             content: 'VCから退出して読み上げを停止しました。',
@@ -129,6 +133,10 @@ export class CallRecruitBot {
     this.client.on('messageCreate', async (message) => {
       if (!message.guild) return;
       await this.voiceReadAloudManager.handleMessage(message);
+    });
+
+    this.client.on('voiceStateUpdate', (oldState, newState) => {
+      this.voiceReadAloudManager.handleVoiceStateUpdate(oldState, newState);
     });
 
     this.client.login(this.token);
@@ -179,6 +187,10 @@ export class CallRecruitBot {
       {
         name: 'leave',
         description: 'VCからBOTを退出させて読み上げを停止する',
+      },
+      {
+        name: 'bye',
+        description: 'leaveの別名（VCから退出）',
       },
     ];
 

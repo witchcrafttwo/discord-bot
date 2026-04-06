@@ -2,10 +2,11 @@ import { Readable } from 'node:stream';
 import { VoiceVoxReader } from './VoiceVoxReader.js';
 
 export class VoiceReadAloudManager {
-  constructor({ voicevoxBaseUrl, speakerId }) {
+  constructor({ voicevoxBaseUrl, defaultSpeakerId, speakerIds }) {
     this.reader = new VoiceVoxReader({
       voicevoxBaseUrl,
-      speakerId,
+      defaultSpeakerId,
+      speakerIds,
     });
 
     this.sessions = new Map();
@@ -64,10 +65,37 @@ export class VoiceReadAloudManager {
     if (!text) return;
 
     const speakerName = message.member?.displayName || message.author.username;
-    session.queue.push(`${speakerName}、${text}`);
+    const speakerId = this.reader.speakerForUser(message.author.id);
+
+    session.queue.push({ text: `${speakerName}、${text}`, speakerId });
 
     if (!session.playing) {
       await this.playNext(message.guild.id);
+    }
+  }
+
+  handleVoiceStateUpdate(oldState, newState) {
+    const guildId = newState.guild?.id || oldState.guild?.id;
+    if (!guildId) return;
+
+    const session = this.sessions.get(guildId);
+    if (!session) return;
+
+    const oldChannelId = oldState.channelId;
+    const newChannelId = newState.channelId;
+
+    if (oldChannelId !== session.channelId && newChannelId !== session.channelId) return;
+
+    const guild = newState.guild || oldState.guild;
+    const channel = guild.channels.cache.get(session.channelId);
+    if (!channel) {
+      this.leave(guildId);
+      return;
+    }
+
+    const humanCount = channel.members.filter((member) => !member.user.bot).size;
+    if (humanCount === 0) {
+      this.leave(guildId);
     }
   }
 
@@ -84,7 +112,7 @@ export class VoiceReadAloudManager {
     session.playing = true;
 
     try {
-      const audioBuffer = await this.reader.synthesize(next);
+      const audioBuffer = await this.reader.synthesize(next.text, next.speakerId);
       const resource = session.voice.createAudioResource(Readable.from(audioBuffer), {
         inputType: session.voice.StreamType.Arbitrary,
       });
