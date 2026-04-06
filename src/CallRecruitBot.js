@@ -79,6 +79,43 @@ export class CallRecruitBot {
           return;
         }
 
+
+        if (interaction.commandName === 'voice') {
+          const speaker = interaction.options.getInteger('speaker');
+          const reset = interaction.options.getBoolean('reset') || false;
+
+          if (reset) {
+            this.voiceReadAloudManager.clearUserSpeaker(interaction.user.id);
+            await interaction.reply({
+              content: 'あなた専用の話者設定をリセットしました。',
+              ephemeral: true,
+            });
+            return;
+          }
+
+          if (!speaker) {
+            await interaction.reply({
+              content: 'speaker に話者IDを指定してください。',
+              ephemeral: true,
+            });
+            return;
+          }
+
+          try {
+            const applied = this.voiceReadAloudManager.setUserSpeaker(interaction.user.id, speaker);
+            await interaction.reply({
+              content: `あなたの読み上げ音声を話者ID ${applied} に設定しました。`,
+              ephemeral: true,
+            });
+          } catch (error) {
+            await interaction.reply({
+              content: `設定に失敗しました: ${error.message}`,
+              ephemeral: true,
+            });
+          }
+          return;
+        }
+
         if (interaction.commandName === 'join') {
           const memberChannel = interaction.member?.voice?.channel;
 
@@ -177,6 +214,25 @@ export class CallRecruitBot {
             description: '0〜59の分',
             type: 4,
             required: true,
+          },
+        ],
+      },
+
+      {
+        name: 'voice',
+        description: '自分の読み上げ話者IDを設定する',
+        options: [
+          {
+            name: 'speaker',
+            description: 'VOICEVOX の話者ID（例: 1）',
+            type: 4,
+            required: false,
+          },
+          {
+            name: 'reset',
+            description: 'trueで自分の話者設定をリセット',
+            type: 5,
+            required: false,
           },
         ],
       },

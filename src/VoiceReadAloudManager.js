@@ -10,6 +10,7 @@ export class VoiceReadAloudManager {
     });
 
     this.sessions = new Map();
+    this.userSpeakerOverrides = new Map();
   }
 
   async join(guild, voiceChannel) {
@@ -65,7 +66,7 @@ export class VoiceReadAloudManager {
     if (!text) return;
 
     const speakerName = message.member?.displayName || message.author.username;
-    const speakerId = this.reader.speakerForUser(message.author.id);
+    const speakerId = this.getSpeakerForUser(message.author.id);
 
     session.queue.push({ text: `${speakerName}、${text}`, speakerId });
 
@@ -97,6 +98,30 @@ export class VoiceReadAloudManager {
     if (humanCount === 0) {
       this.leave(guildId);
     }
+  }
+
+
+  setUserSpeaker(userId, speakerId) {
+    const normalized = Number(speakerId);
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+      throw new Error('話者IDは1以上の整数を指定してください。');
+    }
+
+    this.userSpeakerOverrides.set(String(userId), normalized);
+    return normalized;
+  }
+
+  clearUserSpeaker(userId) {
+    this.userSpeakerOverrides.delete(String(userId));
+  }
+
+  getSpeakerForUser(userId) {
+    const key = String(userId);
+    if (this.userSpeakerOverrides.has(key)) {
+      return this.userSpeakerOverrides.get(key);
+    }
+
+    return this.reader.speakerForUser(userId);
   }
 
   async playNext(guildId) {
