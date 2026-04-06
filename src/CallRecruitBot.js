@@ -17,6 +17,7 @@ export class CallRecruitBot {
     this.recruitHour = 22;
     this.recruitMinute = 0;
     this.job = null;
+    this.recruitmentEnabled = true;
 
     this.voiceReadAloudManager = new VoiceReadAloudManager({
       voicevoxBaseUrl: process.env.VOICEVOX_API_URL,
@@ -79,6 +80,31 @@ export class CallRecruitBot {
           return;
         }
 
+
+
+        if (interaction.commandName === 'recruit_on') {
+          this.recruitmentEnabled = true;
+          this.scheduleRecruitment();
+          await interaction.reply({
+            content: '定期募集をONにしました。',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        if (interaction.commandName === 'recruit_off') {
+          this.recruitmentEnabled = false;
+          if (this.job) {
+            this.job.stop();
+            this.job = null;
+          }
+
+          await interaction.reply({
+            content: '定期募集をOFFにしました。',
+            ephemeral: true,
+          });
+          return;
+        }
 
         if (interaction.commandName === 'voice') {
           const speaker = interaction.options.getInteger('speaker');
@@ -182,6 +208,12 @@ export class CallRecruitBot {
   scheduleRecruitment() {
     if (this.job) {
       this.job.stop();
+      this.job = null;
+    }
+
+    if (!this.recruitmentEnabled) {
+      console.log('Recruitment schedule is disabled.');
+      return;
     }
 
     this.job = cron.schedule(
@@ -218,6 +250,15 @@ export class CallRecruitBot {
         ],
       },
 
+
+      {
+        name: 'recruit_on',
+        description: '定期募集をONにする',
+      },
+      {
+        name: 'recruit_off',
+        description: '定期募集をOFFにする',
+      },
       {
         name: 'voice',
         description: '自分の読み上げ話者IDを設定する',
